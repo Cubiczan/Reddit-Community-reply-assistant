@@ -57,3 +57,7 @@ server.log
 # Z-AI specific
 .zscripts/
 worklog.md
+
+# CHP session artifacts (local only)
+.chp_registry.json
+.chp/sessions/
