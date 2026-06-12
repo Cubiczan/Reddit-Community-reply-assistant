@@ -60,8 +60,10 @@ export async function searchReddit(
           query: keyword,
           sort: params.sort || 'new',
           time: params.timeRange || 'week',
+          // `limit` is supported at runtime (listing option) but missing from
+          // snoowrap's BaseSearchOptions typings.
           limit: params.limit || 25,
-        });
+        } as Parameters<ReturnType<typeof client.getSubreddit>['search']>[0]);
 
       for (const post of posts) {
         if (!results.find(p => p.id === post.id)) {
@@ -92,7 +94,9 @@ export async function searchReddit(
 export async function testRedditConnection(): Promise<boolean> {
   try {
     const client = await createRedditClient();
-    await client.getMe();
+    // Cast: snoowrap's RedditUser type is its own promise fulfillment value,
+    // which trips TS1062 when awaited directly.
+    await (client.getMe() as unknown as Promise<unknown>);
     return true;
   } catch {
     return false;

@@ -14,6 +14,7 @@
 import type { RedditPost } from './reddit';
 import {
   embedText,
+  embedTexts,
   hybridSearch,
   type SemanticSearchResult,
   type ThreadVectorRecord,
