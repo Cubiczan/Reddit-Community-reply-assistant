@@ -1,6 +1,22 @@
 import ZAI from 'z-ai-web-dev-sdk';
 import type { ScoredThread } from './scorer';
 import type { VectorScoredThread } from './vector-scorer';
+import { retry } from './resilience/retry';
+
+const RETRYABLE_LLM_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+
+/**
+ * Decide whether an LLM/SDK error is transient. Retries on rate limits (429)
+ * and 5xx, plus errors that carry no HTTP status (network/timeout); fails fast
+ * on other 4xx (bad request, auth) which a retry would not fix.
+ */
+function isRetryableLlmError(error: unknown): boolean {
+  const status =
+    (error as { status?: number; statusCode?: number } | null)?.status ??
+    (error as { statusCode?: number } | null)?.statusCode;
+  if (typeof status === 'number') return RETRYABLE_LLM_STATUS.has(status);
+  return true;
+}
 
 // Union type to support both legacy scored threads and vector-scored threads
 type ThreadInput = ScoredThread | VectorScoredThread;
@@ -99,14 +115,24 @@ ${threadContext}
 Write a reply that is genuinely helpful and would get upvoted on Reddit. Do NOT mention your company.`;
 
   try {
-    const completion = await zai.chat.completions.create({
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      temperature: 0.8,
-      max_tokens: 500,
-    });
+    // Retry transient LLM failures (429 rate limits, 5xx, network/timeout)
+    // with exponential backoff + jitter instead of failing the whole draft.
+    const completion = await retry(
+      () =>
+        zai.chat.completions.create({
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0.8,
+          max_tokens: 500,
+        }),
+      {
+        maxAttempts: 3,
+        baseDelayMs: 500,
+        shouldRetry: (error) => isRetryableLlmError(error),
+      }
+    );
 
     return completion.choices[0]?.message?.content || '';
   } catch (error) {

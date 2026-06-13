@@ -1,15 +1,40 @@
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import { db } from '@/lib/db';
 import { draftReply } from '@/lib/reply-drafter';
 import type { ScoredThread } from '@/lib/scorer';
+
+/**
+ * Explicit allowlist of user-mutable thread fields. Prevents mass-assignment:
+ * the raw request body was previously spread straight into `data`, letting a
+ * caller overwrite scores, ids, redditId, businessId, timestamps, etc.
+ * Only these review-workflow fields may be updated via PUT.
+ */
+const ThreadUpdateSchema = z
+  .object({
+    replyStatus: z.string(),
+    isRelevant: z.boolean(),
+    isProcessed: z.boolean(),
+    notes: z.string().nullable(),
+    draftReply: z.string().nullable(),
+  })
+  .partial()
+  .strict();
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
     const body = await request.json();
+    const parsed = ThreadUpdateSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid update payload', details: parsed.error.flatten() },
+        { status: 400 }
+      );
+    }
     const thread = await db.redditThread.update({
       where: { id },
-      data: body,
+      data: parsed.data,
     });
     return NextResponse.json(thread);
   } catch (error: any) {

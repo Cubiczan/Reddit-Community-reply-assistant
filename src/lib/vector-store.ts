@@ -16,6 +16,8 @@
  *                   python vectorai-bridge.py
  */
 
+import { safeFetch } from './resilience/safeFetch';
+
 // ─── Types ───────────────────────────────────────────────────────────
 
 export interface ThreadVectorRecord {
@@ -76,7 +78,7 @@ const BRIDGE_CONFIG = {
  * The bridge runs sentence-transformers/all-MiniLM-L6-v2 (384-dim).
  */
 export async function embedText(text: string): Promise<number[]> {
-  const response = await fetch(`${BRIDGE_CONFIG.bridgeUrl}/api/embed`, {
+  const response = await safeFetch(`${BRIDGE_CONFIG.bridgeUrl}/api/embed`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text }),
@@ -94,7 +96,7 @@ export async function embedText(text: string): Promise<number[]> {
  * Batch embed multiple texts in one call (faster than one-by-one).
  */
 export async function embedTexts(texts: string[]): Promise<number[][]> {
-  const response = await fetch(`${BRIDGE_CONFIG.bridgeUrl}/api/embed-batch`, {
+  const response = await safeFetch(`${BRIDGE_CONFIG.bridgeUrl}/api/embed-batch`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ texts }),
@@ -116,7 +118,7 @@ export async function embedTexts(texts: string[]): Promise<number[][]> {
  *   client.collections.create(name, VectorParams(size=384, distance=Cosine))
  */
 export async function initCollection(): Promise<void> {
-  const response = await fetch(`${BRIDGE_CONFIG.bridgeUrl}/api/collections/init`, {
+  const response = await safeFetch(`${BRIDGE_CONFIG.bridgeUrl}/api/collections/init`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -143,7 +145,7 @@ export async function upsertThreads(threads: ThreadVectorRecord[]): Promise<void
   for (let i = 0; i < threads.length; i += BATCH_SIZE) {
     const batch = threads.slice(i, i + BATCH_SIZE);
 
-    const response = await fetch(
+    const response = await safeFetch(
       `${BRIDGE_CONFIG.bridgeUrl}/api/collections/${BRIDGE_CONFIG.collectionName}/upsert`,
       {
         method: 'POST',
@@ -219,7 +221,7 @@ export async function semanticSearch(
     filters.score = { $gte: minScore };
   }
 
-  const response = await fetch(
+  const response = await safeFetch(
     `${BRIDGE_CONFIG.bridgeUrl}/api/collections/${BRIDGE_CONFIG.collectionName}/search`,
     {
       method: 'POST',
@@ -323,7 +325,7 @@ export async function hybridSearch(
 export async function deleteThreads(ids: string[]): Promise<void> {
   if (ids.length === 0) return;
 
-  const response = await fetch(
+  const response = await safeFetch(
     `${BRIDGE_CONFIG.bridgeUrl}/api/collections/${BRIDGE_CONFIG.collectionName}/delete`,
     {
       method: 'POST',
@@ -342,7 +344,7 @@ export async function deleteThreads(ids: string[]): Promise<void> {
  * Uses: client.points.count(collection)
  */
 export async function getCollectionStats(): Promise<{ count: number; collection: string }> {
-  const response = await fetch(
+  const response = await safeFetch(
     `${BRIDGE_CONFIG.bridgeUrl}/api/collections/${BRIDGE_CONFIG.collectionName}/stats`
   );
 
@@ -367,7 +369,7 @@ export async function healthCheck(): Promise<{
   embedding: boolean;
 }> {
   try {
-    const response = await fetch(`${BRIDGE_CONFIG.bridgeUrl}/api/health`);
+    const response = await safeFetch(`${BRIDGE_CONFIG.bridgeUrl}/api/health`);
     if (!response.ok) {
       return { bridge: false, vectoraiDb: false, embedding: false };
     }

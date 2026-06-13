@@ -1,4 +1,6 @@
 import snoowrap from 'snoowrap';
+import { retry } from './resilience/retry';
+import { ResilienceError } from './resilience/errors';
 
 export interface RedditSearchParams {
   query: string;
@@ -35,13 +37,38 @@ export async function createRedditClient(): Promise<snoowrap> {
     throw new Error('Reddit API credentials not configured in .env');
   }
 
-  return new snoowrap({
+  const client = new snoowrap({
     userAgent: 'RedditMarketingSystem/1.0 by ' + username,
     clientId,
     clientSecret,
     username,
     password,
   });
+
+  // Bound every Reddit API request so a slow/unresponsive Reddit cannot hang
+  // a scan run indefinitely. snoowrap aborts the underlying request after this.
+  client.config({ requestTimeout: 10_000 });
+
+  return client;
+}
+
+const RETRYABLE_REDDIT_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+
+/**
+ * Decide whether a Reddit/snoowrap error is transient and worth retrying.
+ * Retries on rate limits (429) and 5xx; also retries network/timeout errors
+ * that carry no HTTP status. Fails fast on other 4xx (e.g. 400/403/404).
+ */
+function isRetryableRedditError(error: unknown): boolean {
+  if (error instanceof ResilienceError) {
+    if (error.kind === 'aborted' || error.kind === 'ssrf') return false;
+    return error.status === undefined || RETRYABLE_REDDIT_STATUS.has(error.status);
+  }
+  const status = (error as { statusCode?: number; status?: number } | null)?.statusCode
+    ?? (error as { status?: number } | null)?.status;
+  if (typeof status === 'number') return RETRYABLE_REDDIT_STATUS.has(status);
+  // No status (network/timeout/abort surfaced by snoowrap) — treat as transient.
+  return true;
 }
 
 export async function searchReddit(
@@ -54,16 +81,26 @@ export async function searchReddit(
 
   for (const keyword of keywords.slice(0, 5)) {
     try {
-      const posts = await client
-        .getSubreddit(subredditNames)
-        .search({
-          query: keyword,
-          sort: params.sort || 'new',
-          time: params.timeRange || 'week',
-          // `limit` is supported at runtime (listing option) but missing from
-          // snoowrap's BaseSearchOptions typings.
-          limit: params.limit || 25,
-        } as Parameters<ReturnType<typeof client.getSubreddit>['search']>[0]);
+      // Retry the search with exponential backoff + jitter so a transient
+      // 429/5xx from Reddit does not silently drop this keyword's results.
+      const posts = await retry(
+        () =>
+          client
+            .getSubreddit(subredditNames)
+            .search({
+              query: keyword,
+              sort: params.sort || 'new',
+              time: params.timeRange || 'week',
+              // `limit` is supported at runtime (listing option) but missing from
+              // snoowrap's BaseSearchOptions typings.
+              limit: params.limit || 25,
+            } as Parameters<ReturnType<typeof client.getSubreddit>['search']>[0]),
+        {
+          maxAttempts: 3,
+          baseDelayMs: 1000,
+          shouldRetry: (error) => isRetryableRedditError(error),
+        }
+      );
 
       for (const post of posts) {
         if (!results.find(p => p.id === post.id)) {
