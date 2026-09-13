@@ -763,11 +763,14 @@
     // ---- Render outputs ----
     function renderOutputs(run) {
       const container = document.getElementById("outputs-body");
-      container.innerHTML = "";
+      container.replaceChildren();
 
       const outputs = run.outputs || [];
       if (outputs.length === 0) {
-        container.innerHTML = '<div class="empty-state">No output files</div>';
+        const empty = document.createElement("div");
+        empty.className = "empty-state";
+        empty.textContent = "No output files";
+        container.appendChild(empty);
         return;
       }
 
@@ -844,9 +847,19 @@
             container.appendChild(sheetLabel);
           }
 
-          const htmlStr = XLSX.utils.sheet_to_html(ws, { editable: false });
           const wrapper = document.createElement("div");
-          wrapper.innerHTML = htmlStr;
+          const table = document.createElement("table");
+          const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
+          for (const row of rows) {
+            const tr = document.createElement("tr");
+            for (const cell of row) {
+              const td = document.createElement("td");
+              td.textContent = cell == null ? "" : String(cell);
+              tr.appendChild(td);
+            }
+            table.appendChild(tr);
+          }
+          wrapper.appendChild(table);
           container.appendChild(wrapper);
         }
       } catch (err) {
@@ -873,35 +886,46 @@
       const summary = grading.summary || {};
       const expectations = grading.expectations || [];
 
-      let html = '<div style="padding: 1rem;">';
+      const wrap = document.createElement("div");
+      wrap.style.padding = "1rem";
 
-      // Summary line
       const passRate = summary.pass_rate != null
         ? Math.round(summary.pass_rate * 100) + "%"
         : "?";
       const badgeClass = summary.pass_rate >= 0.8 ? "grade-pass" : summary.pass_rate >= 0.5 ? "" : "grade-fail";
-      html += '<div class="grades-summary">';
-      html += '<span class="grade-badge ' + badgeClass + '">' + passRate + '</span>';
-      html += '<span>' + (summary.passed || 0) + ' passed, ' + (summary.failed || 0) + ' failed of ' + (summary.total || 0) + '</span>';
-      html += '</div>';
+      const summaryRow = document.createElement("div");
+      summaryRow.className = "grades-summary";
+      const badge = document.createElement("span");
+      badge.className = "grade-badge " + badgeClass;
+      badge.textContent = passRate;
+      const counts = document.createElement("span");
+      counts.textContent = (summary.passed || 0) + " passed, " + (summary.failed || 0) + " failed of " + (summary.total || 0);
+      summaryRow.appendChild(badge);
+      summaryRow.appendChild(counts);
+      wrap.appendChild(summaryRow);
 
-      // Assertions list
-      html += '<ul class="assertion-list">';
+      const list = document.createElement("ul");
+      list.className = "assertion-list";
       for (const exp of expectations) {
-        const statusClass = exp.passed ? "pass" : "fail";
-        const statusIcon = exp.passed ? "\u2713" : "\u2717";
-        html += '<li class="assertion-item">';
-        html += '<span class="assertion-status ' + statusClass + '">' + statusIcon + '</span>';
-        html += '<span>' + escapeHtml(exp.text) + '</span>';
+        const li = document.createElement("li");
+        li.className = "assertion-item";
+        const status = document.createElement("span");
+        status.className = "assertion-status " + (exp.passed ? "pass" : "fail");
+        status.textContent = exp.passed ? "\u2713" : "\u2717";
+        const text = document.createElement("span");
+        text.textContent = exp.text || "";
+        li.appendChild(status);
+        li.appendChild(text);
         if (exp.evidence) {
-          html += '<div class="assertion-evidence">' + escapeHtml(exp.evidence) + '</div>';
+          const ev = document.createElement("div");
+          ev.className = "assertion-evidence";
+          ev.textContent = exp.evidence;
+          li.appendChild(ev);
         }
-        html += '</li>';
+        list.appendChild(li);
       }
-      html += '</ul>';
-
-      html += '</div>';
-      content.innerHTML = html;
+      wrap.appendChild(list);
+      content.replaceChildren(wrap);
     }
 
     function toggleGrades() {
@@ -928,7 +952,7 @@
       document.getElementById("prev-outputs-arrow").classList.remove("open");
 
       // Render the files into the content area
-      content.innerHTML = "";
+      content.replaceChildren();
       const wrapper = document.createElement("div");
       wrapper.style.padding = "1rem";
 
@@ -1097,9 +1121,51 @@
     }
 
     function escapeHtml(text) {
-      const div = document.createElement("div");
-      div.textContent = text;
-      return div.innerHTML;
+      return String(text ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    const SAFE_HTML_TAGS = new Set([
+      "TABLE", "THEAD", "TBODY", "TR", "TH", "TD",
+      "H2", "H3", "H4", "P", "DIV", "SPAN", "UL", "LI", "STRONG",
+    ]);
+    const SAFE_HTML_ATTRS = new Set(["class", "style", "title", "colspan"]);
+
+    function setSafeHtml(container, html) {
+      const parsed = new DOMParser().parseFromString(html, "text/html");
+      container.replaceChildren();
+      function importSafe(node) {
+        if (node.nodeType === Node.TEXT_NODE) {
+          return document.createTextNode(node.textContent);
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE || !SAFE_HTML_TAGS.has(node.tagName)) {
+          const frag = document.createDocumentFragment();
+          node.childNodes.forEach((child) => {
+            const next = importSafe(child);
+            if (next) frag.appendChild(next);
+          });
+          return frag;
+        }
+        const el = document.createElement(node.tagName);
+        for (const attr of node.attributes) {
+          if (SAFE_HTML_ATTRS.has(attr.name)) {
+            el.setAttribute(attr.name, attr.value);
+          }
+        }
+        node.childNodes.forEach((child) => {
+          const next = importSafe(child);
+          if (next) el.appendChild(next);
+        });
+        return el;
+      }
+      parsed.body.childNodes.forEach((child) => {
+        const next = importSafe(child);
+        if (next) container.appendChild(next);
+      });
     }
 
     // ---- View switching ----
@@ -1314,7 +1380,7 @@
         html += "</ul></div>";
       }
 
-      container.innerHTML = html;
+      setSafeHtml(container, html);
     }
 
     // ---- Start ----
