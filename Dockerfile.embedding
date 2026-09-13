@@ -10,6 +10,17 @@ RUN pip install --no-cache-dir \
 
 COPY embedding-server.py .
 
+# HuggingFace / sentence-transformers cache (writable by the runtime user)
+RUN groupadd --system --gid 10001 appuser \
+    && useradd --system --uid 10001 --gid appuser --create-home appuser \
+    && mkdir -p /home/appuser/.cache \
+    && chown -R appuser:appuser /home/appuser/.cache
+
+ENV HOME=/home/appuser \
+    HF_HOME=/home/appuser/.cache/huggingface
+
+USER appuser
+
 EXPOSE 11434
 
 CMD ["python", "embedding-server.py"]

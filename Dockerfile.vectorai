@@ -19,9 +19,20 @@ RUN pip install --no-cache-dir \
 # Copy the bridge server (includes embedding endpoints)
 COPY vectorai-bridge.py vectorai_filters.py .
 
+# HuggingFace / sentence-transformers cache (writable by the runtime user)
+RUN groupadd --system --gid 10001 appuser \
+    && useradd --system --uid 10001 --gid appuser --create-home appuser \
+    && mkdir -p /home/appuser/.cache \
+    && chown -R appuser:appuser /home/appuser/.cache
+
+ENV HOME=/home/appuser \
+    HF_HOME=/home/appuser/.cache/huggingface
+
+USER appuser
+
 EXPOSE 27832
 
-# Health check
+# Health check (curl remains available; runs as the non-root USER)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
     CMD curl -f http://localhost:27832/api/health || exit 1
 
