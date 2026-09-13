@@ -1,9 +1,19 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { parseEntityId } from '@/lib/query-guards';
+
+function routeId(id: string) {
+  return parseEntityId(id);
+}
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params;
+    const { id: rawId } = await params;
+    const idParsed = routeId(rawId);
+    if (!idParsed.ok) {
+      return NextResponse.json({ error: 'Invalid business id' }, { status: 400 });
+    }
+    const { id } = idParsed;
     const business = await db.businessProfile.findUnique({
       where: { id },
       include: {
@@ -21,7 +31,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params;
+    const { id: rawId } = await params;
+    const idParsed = routeId(rawId);
+    if (!idParsed.ok) {
+      return NextResponse.json({ error: 'Invalid business id' }, { status: 400 });
+    }
+    const { id } = idParsed;
     const body = await request.json();
     const business = await db.businessProfile.update({
       where: { id },
@@ -35,7 +50,12 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params;
+    const { id: rawId } = await params;
+    const idParsed = routeId(rawId);
+    if (!idParsed.ok) {
+      return NextResponse.json({ error: 'Invalid business id' }, { status: 400 });
+    }
+    const { id } = idParsed;
     await db.redditThread.deleteMany({ where: { businessId: id } });
     await db.scanRun.deleteMany({ where: { businessId: id } });
     await db.emailDigest.deleteMany({ where: { businessId: id } });

@@ -1,10 +1,18 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { sendDigestEmail } from '@/lib/email-service';
+import { BusinessIdBodySchema } from '@/lib/query-guards';
 
 export async function POST(request: Request) {
   try {
-    const { businessId } = await request.json();
+    const parsed = BusinessIdBodySchema.safeParse(await request.json());
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid request body', details: parsed.error.flatten() },
+        { status: 400 },
+      );
+    }
+    const { businessId } = parsed.data;
     const business = await db.businessProfile.findUnique({ where: { id: businessId } });
     if (!business) return NextResponse.json({ error: 'Business not found' }, { status: 404 });
 

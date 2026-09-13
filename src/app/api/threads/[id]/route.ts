@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db } from '@/lib/db';
 import { draftReply } from '@/lib/reply-drafter';
 import type { ScoredThread } from '@/lib/scorer';
+import { parseEntityId, ReplyStatusSchema } from '@/lib/query-guards';
 
 /**
  * Explicit allowlist of user-mutable thread fields. Prevents mass-assignment:
@@ -12,7 +13,7 @@ import type { ScoredThread } from '@/lib/scorer';
  */
 const ThreadUpdateSchema = z
   .object({
-    replyStatus: z.string(),
+    replyStatus: ReplyStatusSchema,
     isRelevant: z.boolean(),
     isProcessed: z.boolean(),
     notes: z.string().nullable(),
@@ -21,9 +22,18 @@ const ThreadUpdateSchema = z
   .partial()
   .strict();
 
+function routeId(id: string) {
+  return parseEntityId(id);
+}
+
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params;
+    const { id: rawId } = await params;
+    const idParsed = routeId(rawId);
+    if (!idParsed.ok) {
+      return NextResponse.json({ error: 'Invalid thread id' }, { status: 400 });
+    }
+    const { id } = idParsed;
     const body = await request.json();
     const parsed = ThreadUpdateSchema.safeParse(body);
     if (!parsed.success) {
@@ -44,7 +54,12 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params;
+    const { id: rawId } = await params;
+    const idParsed = routeId(rawId);
+    if (!idParsed.ok) {
+      return NextResponse.json({ error: 'Invalid thread id' }, { status: 400 });
+    }
+    const { id } = idParsed;
     const thread = await db.redditThread.findUnique({
       where: { id },
       include: { business: true },

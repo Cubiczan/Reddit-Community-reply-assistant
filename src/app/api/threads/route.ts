@@ -1,20 +1,26 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import {
+  ThreadListQuerySchema,
+  searchParamsObject,
+  threadListWhere,
+} from '@/lib/query-guards';
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const businessId = searchParams.get('businessId');
-    const status = searchParams.get('status');
-    const minScore = searchParams.get('minScore');
-
-    const where: Record<string, unknown> = {};
-    if (businessId) where.businessId = businessId;
-    if (status) where.replyStatus = status;
-    if (minScore) where.totalScore = { gte: parseInt(minScore) };
+    const parsed = ThreadListQuerySchema.safeParse(
+      searchParamsObject(searchParams, ['businessId', 'status', 'minScore']),
+    );
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid query parameters', details: parsed.error.flatten() },
+        { status: 400 },
+      );
+    }
 
     const threads = await db.redditThread.findMany({
-      where,
+      where: threadListWhere(parsed.data),
       orderBy: { totalScore: 'desc' },
       take: 100,
     });

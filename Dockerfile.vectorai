@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir \
     torch==2.1.2 --index-url https://download.pytorch.org/whl/cpu
 
 # Copy the bridge server (includes embedding endpoints)
-COPY vectorai-bridge.py .
+COPY vectorai-bridge.py vectorai_filters.py .
 
 EXPOSE 27832
 
