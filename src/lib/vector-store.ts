@@ -60,6 +60,64 @@ export interface HybridSearchOptions extends VectorSearchOptions {
   engagementWeight?: number;   // Weight for engagement score in fused ranking (0–1, default 0.3)
 }
 
+type VectorMetadataFilters = Record<string, { $in?: string[]; $gte?: number; $lte?: number }>;
+
+function asFiniteNumber(value: unknown, fallback = 0): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function asStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string' && item.length > 0 && item.length <= 128);
+}
+
+/**
+ * Build VectorAI metadata filters from coerced scalars only.
+ * Never spreads caller-supplied objects, so `$where` / operator payloads
+ * cannot be injected into the bridge query.
+ */
+export function buildVectorMetadataFilters(options: {
+  subredditFilter?: unknown;
+  minAgeHours?: unknown;
+  maxAgeHours?: unknown;
+  minComments?: unknown;
+  minScore?: unknown;
+  now?: number;
+}): VectorMetadataFilters {
+  const now = options.now ?? Math.floor(Date.now() / 1000);
+  const filters: VectorMetadataFilters = {};
+  const subreddits = asStringList(options.subredditFilter);
+  if (subreddits.length > 0) {
+    filters.subreddit = { $in: subreddits };
+  }
+
+  const maxAgeHours = asFiniteNumber(options.maxAgeHours, 0);
+  if (maxAgeHours > 0) {
+    filters.created_at_reddit = { $gte: now - maxAgeHours * 3600 };
+  }
+
+  const minAgeHours = asFiniteNumber(options.minAgeHours, 0);
+  if (minAgeHours > 0) {
+    filters.created_at_reddit = {
+      ...filters.created_at_reddit,
+      $lte: now - minAgeHours * 3600,
+    };
+  }
+
+  const minComments = asFiniteNumber(options.minComments, 0);
+  if (minComments > 0) {
+    filters.num_comments = { $gte: minComments };
+  }
+
+  const minScore = asFiniteNumber(options.minScore, 0);
+  if (minScore > 0) {
+    filters.score = { $gte: minScore };
+  }
+
+  return filters;
+}
+
 // ─── Configuration ──────────────────────────────────────────────────
 
 const BRIDGE_CONFIG = {
@@ -195,31 +253,16 @@ export async function semanticSearch(
   // Embed the query text
   const queryVector = await embedText(queryText);
 
-  // Build metadata filters (bridge converts these to VectorAI FilterBuilder)
+  // Build metadata filters from coerced scalars only — never spread caller objects.
   const now = Math.floor(Date.now() / 1000);
-  const filters: Record<string, any> = {};
-
-  if (subredditFilter && subredditFilter.length > 0) {
-    filters.subreddit = { $in: subredditFilter };
-  }
-
-  if (maxAgeHours) {
-    const minTimestamp = now - (maxAgeHours * 3600);
-    filters.created_at_reddit = { $gte: minTimestamp };
-  }
-
-  if (minAgeHours) {
-    const maxTimestamp = now - (minAgeHours * 3600);
-    filters.created_at_reddit = { ...filters.created_at_reddit, $lte: maxTimestamp };
-  }
-
-  if (minComments > 0) {
-    filters.num_comments = { $gte: minComments };
-  }
-
-  if (minScore > 0) {
-    filters.score = { $gte: minScore };
-  }
+  const filters = buildVectorMetadataFilters({
+    subredditFilter,
+    minAgeHours,
+    maxAgeHours,
+    minComments,
+    minScore,
+    now,
+  });
 
   const response = await safeFetch(
     `${BRIDGE_CONFIG.bridgeUrl}/api/collections/${BRIDGE_CONFIG.collectionName}/search`,

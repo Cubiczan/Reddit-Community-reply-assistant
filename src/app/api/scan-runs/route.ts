@@ -1,16 +1,26 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import {
+  BusinessFilterQuerySchema,
+  businessFilterWhere,
+  searchParamsObject,
+} from '@/lib/query-guards';
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const businessId = searchParams.get('businessId');
-
-    const where: Record<string, unknown> = {};
-    if (businessId) where.businessId = businessId;
+    const parsed = BusinessFilterQuerySchema.safeParse(
+      searchParamsObject(searchParams, ['businessId']),
+    );
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid query parameters', details: parsed.error.flatten() },
+        { status: 400 },
+      );
+    }
 
     const scanRuns = await db.scanRun.findMany({
-      where,
+      where: businessFilterWhere(parsed.data),
       orderBy: { startedAt: 'desc' },
       take: 50,
     });

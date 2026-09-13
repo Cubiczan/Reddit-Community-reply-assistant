@@ -34,6 +34,35 @@ const PT_PER_PX = 0.75;
 const PX_PER_IN = 96;
 const EMU_PER_IN = 914400;
 
+function resolveWithinBase(userPath, baseDir) {
+  if (typeof userPath !== 'string' || userPath.length === 0) {
+    throw new Error('Invalid path');
+  }
+  if (userPath.includes('\0')) {
+    throw new Error('Invalid path');
+  }
+
+  let candidate = userPath;
+  if (candidate.startsWith('file://')) {
+    candidate = candidate.slice('file://'.length);
+    if (candidate.startsWith('localhost')) candidate = candidate.slice('localhost'.length);
+  }
+
+  const base = path.resolve(baseDir);
+  const resolved = path.resolve(base, candidate);
+  const relative = path.relative(base, resolved);
+
+  if (
+    relative === '..' ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    throw new Error(`Path escapes allowed directory: ${userPath}`);
+  }
+
+  return resolved;
+}
+
 // Helper: Fix image path if file extension doesn't match actual format
 function fixImageExtension(imagePath, tmpDir) {
   try {
@@ -149,11 +178,9 @@ function validateTextBoxPosition(slideData, bodyDimensions) {
 }
 
 // Helper: Add background to slide
-async function addBackground(slideData, targetSlide, tmpDir) {
+async function addBackground(slideData, targetSlide, tmpDir, baseDir) {
   if (slideData.background.type === 'image' && slideData.background.path) {
-    let imagePath = slideData.background.path.startsWith('file://')
-      ? slideData.background.path.replace('file://', '')
-      : slideData.background.path;
+    const imagePath = resolveWithinBase(slideData.background.path, baseDir);
     targetSlide.background = { path: fixImageExtension(imagePath, tmpDir) };
   } else if (slideData.background.type === 'color' && slideData.background.value) {
     targetSlide.background = { color: slideData.background.value };
@@ -161,10 +188,10 @@ async function addBackground(slideData, targetSlide, tmpDir) {
 }
 
 // Helper: Add elements to slide
-function addElements(slideData, targetSlide, pres, tmpDir) {
+function addElements(slideData, targetSlide, pres, tmpDir, baseDir) {
   for (const el of slideData.elements) {
     if (el.type === 'image') {
-      let imagePath = el.src.startsWith('file://') ? el.src.replace('file://', '') : el.src;
+      const imagePath = resolveWithinBase(el.src, baseDir);
       targetSlide.addImage({
         path: fixImageExtension(imagePath, tmpDir),
         x: el.position.x,
@@ -961,10 +988,13 @@ async function extractSlideData(page) {
 async function html2pptx(htmlFile, pres, options = {}) {
   const {
     tmpDir = process.env.TMPDIR || '/tmp',
-    slide = null
+    slide = null,
+    baseDir = process.cwd()
   } = options;
 
   try {
+    const filePath = resolveWithinBase(htmlFile, baseDir);
+
     // Use Chrome on macOS, default Chromium on Unix
     const launchOptions = { env: { TMPDIR: tmpDir } };
     if (process.platform === 'darwin') {
@@ -976,7 +1006,6 @@ async function html2pptx(htmlFile, pres, options = {}) {
     let bodyDimensions;
     let slideData;
 
-    const filePath = path.isAbsolute(htmlFile) ? htmlFile : path.join(process.cwd(), htmlFile);
     const validationErrors = [];
 
     try {
@@ -1029,8 +1058,8 @@ async function html2pptx(htmlFile, pres, options = {}) {
 
     const targetSlide = slide || pres.addSlide();
 
-    await addBackground(slideData, targetSlide, tmpDir);
-    addElements(slideData, targetSlide, pres, tmpDir);
+    await addBackground(slideData, targetSlide, tmpDir, baseDir);
+    addElements(slideData, targetSlide, pres, tmpDir, baseDir);
 
     return { slide: targetSlide, placeholders: slideData.placeholders };
   } catch (error) {

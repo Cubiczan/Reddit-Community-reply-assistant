@@ -46,6 +46,8 @@ from typing import Optional
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
+from vectorai_filters import sanitize_search_filters
+
 # ─── Configuration ──────────────────────────────────────────────────
 
 VECTORAI_GRPC_HOST = os.environ.get("VECTORAI_GRPC_HOST", "localhost:50051")
@@ -313,7 +315,10 @@ def search_vectors(name):
     data = request.get_json()
     vector = data.get("vector", [])
     top_k = data.get("top_k", 20)
-    filters = data.get("filters")
+    try:
+        filters = sanitize_search_filters(data.get("filters"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     if not vector:
         return jsonify({"error": "vector is required"}), 400
